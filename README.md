@@ -165,4 +165,4 @@ If you need a PR created from your local branch, I can help automate that.
 ISC
 
 ## Acknowledgements
-Thanks to the upstream project `JamesANZ/memory-mcp` and its contributors whose work inspired and enabled this repository. Special thanks to the maintainers of the original Memory MCP implementation and to everyone who contributed ideas, patches, or reviews.
+Thanks to the upstream project `JamesANZ/memory-mcp` (https://github.com/JamesANZ/memory-mcp) and its contributors whose work inspired and enabled this repository. Special thanks to the maintainers of the original Memory MCP implementation and to everyone who contributed ideas, patches, or reviews.
