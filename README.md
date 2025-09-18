@@ -74,200 +74,96 @@ The CLI demo allows you to:
 
 2. **get-memories**: Retrieve all memories from the database
    - No parameters required
+# Memory MCP
 
-3. **add-memories**: Add new memories to the database without overwriting existing ones
-   - `memories`: Array of memory strings to add
-   - `llm`: Name of the LLM (e.g., 'chatgpt', 'claude')
-   - `userId`: Optional user identifier
+[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/JamesANZ/memory-mcp)](https://archestra.ai/mcp-catalog/jamesanz__memory-mcp)
 
-4. **clear-memories**: Clear all memories from the database
-   - No parameters required
+A Model Context Protocol (MCP) server for logging and retrieving memories from LLM conversations with context-window caching, relevance scoring and MongoDB persistence.
 
-### Context Window Caching Tools
+## Quick start
 
-5. **archive-context**: Archive context messages for a conversation with tags and metadata
-   - `conversationId`: Unique identifier for the conversation
-   - `contextMessages`: Array of context messages to archive
-   - `tags`: Tags for categorizing the archived content
-   - `llm`: Name of the LLM (e.g., 'chatgpt', 'claude')
-   - `userId`: Optional user identifier
+Requirements:
+- Node.js 18+ and npm
+- MongoDB (local or remote)
 
-6. **retrieve-context**: Retrieve relevant archived context for a conversation
-   - `conversationId`: Unique identifier for the conversation
-   - `tags`: Optional tags to filter by
-   - `minRelevanceScore`: Minimum relevance score (0-1, default: 0.1)
-   - `limit`: Maximum number of items to return (default: 10)
-
-7. **score-relevance**: Score the relevance of archived context against current conversation context
-   - `conversationId`: Unique identifier for the conversation
-   - `currentContext`: Current conversation context to compare against
-   - `llm`: Name of the LLM (e.g., 'chatgpt', 'claude')
-
-8. **create-summary**: Create a summary of context items and link them to the summary
-   - `conversationId`: Unique identifier for the conversation
-   - `contextItems`: Context items to summarize
-   - `summaryText`: Human-provided summary text
-   - `llm`: Name of the LLM (e.g., 'chatgpt', 'claude')
-   - `userId`: Optional user identifier
-
-9. **get-conversation-summaries**: Get all summaries for a specific conversation
-   - `conversationId`: Unique identifier for the conversation
-
-10. **search-context-by-tags**: Search archived context and summaries by tags
-    - `tags`: Tags to search for
-
-### Example Usage in LLM
-
-#### Basic Memory Operations
-
-1. **Save all memories** (overwrites existing):
-
-   ```
-   User: "Save all my memories from this conversation to the MCP server"
-   LLM: [Uses save-memories tool with current conversation memories]
-   ```
-
-2. **Retrieve all memories**:
-   ```
-   User: "Get all my memories from the MCP server"
-   LLM: [Uses get-memories tool to retrieve stored memories]
-   ```
-
-#### Context Window Caching Workflow
-
-1. **Archive context when window gets full**:
-
-   ```
-   User: "The conversation is getting long, archive the early parts"
-   LLM: [Uses archive-context tool to store old messages with tags]
-   ```
-
-2. **Score relevance of archived content**:
-
-   ```
-   User: "How relevant is the archived content to our current discussion?"
-   LLM: [Uses score-relevance tool to evaluate archived content]
-   ```
-
-3. **Retrieve relevant archived context**:
-
-   ```
-   User: "Bring back the relevant archived information"
-   LLM: [Uses retrieve-context tool to get relevant archived content]
-   ```
-
-4. **Create summaries for long conversations**:
-   ```
-   User: "Summarize the early parts of our conversation"
-   LLM: [Uses create-summary tool to condense archived content]
-   ```
-
-## Conversation Orchestration System
-
-The `ConversationOrchestrator` class provides automatic context window management:
-
-### Key Features
-
-- **Automatic Archiving**: Archives content when context usage reaches 80%
-- **Intelligent Retrieval**: Retrieves relevant content when usage drops below 30%
-- **Relevance Scoring**: Uses keyword overlap to score archived content relevance
-- **Smart Tagging**: Automatically generates tags based on content keywords
-- **Conversation State Management**: Tracks active conversations and their context
-- **Recommendations**: Provides suggestions for optimal context management
-
-### Usage Example
-
-```typescript
-import { ConversationOrchestrator } from "./orchestrator.js";
-
-const orchestrator = new ConversationOrchestrator(8000); // 8k word limit
-
-// Add a message (triggers automatic archiving/retrieval)
-const result = await orchestrator.addMessage(
-  "conversation-123",
-  "This is a new message in the conversation",
-  "claude",
-);
-
-// Check if archiving is needed
-if (result.archiveDecision?.shouldArchive) {
-  await orchestrator.executeArchive(result.archiveDecision, result.state);
-}
-
-// Check if retrieval is needed
-if (result.retrievalDecision?.shouldRetrieve) {
-  await orchestrator.executeRetrieval(result.retrievalDecision, result.state);
-}
-```
-
-## Database Schema
-
-### Basic Memory Structure
-
-```typescript
-type BasicMemory = {
-  _id: ObjectId;
-  memories: string[]; // Array of memory strings
-  timestamp: Date; // When memories were saved
-  llm: string; // LLM identifier (e.g., 'chatgpt', 'claude')
-  userId?: string; // Optional user identifier
-};
-```
-
-### Extended Memory Structure (Context Caching)
-
-```typescript
-type ExtendedMemory = {
-  _id: ObjectId;
-  memories: string[]; // Array of memory strings
-  timestamp: Date; // When memories were saved
-  llm: string; // LLM identifier
-  userId?: string; // Optional user identifier
-  conversationId?: string; // Unique conversation identifier
-  contextType?: "active" | "archived" | "summary";
-  relevanceScore?: number; // 0-1 relevance score
-  tags?: string[]; // Categorization tags
-  parentContextId?: ObjectId; // Reference to original content for summaries
-  messageIndex?: number; // Order within conversation
-  wordCount?: number; // Size tracking
-  summaryText?: string; // Condensed version
-};
-```
-
-## Context Window Caching Workflow
-
-The orchestration system automatically:
-
-1. **Monitors conversation length** and context usage
-2. **Archives content** when context usage reaches 80%
-3. **Scores relevance** of archived content against current context
-4. **Retrieves relevant content** when usage drops below 30%
-5. **Creates summaries** to condense very long conversations
-
-### Key Features
-
-- **Conversation Grouping**: All archived content is linked to specific conversation IDs
-- **Relevance Scoring**: Simple keyword overlap scoring (can be enhanced with semantic similarity)
-- **Tag-based Organization**: Categorize content for easy retrieval
-- **Summary Linking**: Preserve links between summaries and original content
-- **Backward Compatibility**: All existing memory functions work unchanged
-- **Automatic Management**: No manual intervention required for basic operations
-
-## Development
-
-To run in development mode:
+Install dependencies and build:
 
 ```bash
+npm install
 npm run build
-node build/index.js
 ```
 
-To run the CLI demo:
+Run the server (after build):
+
+```bash
+npm start
+```
+
+Run the interactive CLI demo:
 
 ```bash
 npm run cli
 ```
 
+## Configuration
+
+Set the MongoDB connection string via environment variable:
+
+```bash
+export MONGODB_URI="mongodb://localhost:27017/memorydb"
+```
+
+You can also set `PORT` to change the HTTP server port (default: 3000).
+
+## Docker
+
+Build and run with Docker (basic example):
+
+```bash
+docker build -t memory-mcp .
+docker run -e MONGODB_URI="mongodb://host.docker.internal:27017/memorydb" -p 3000:3000 memory-mcp
+```
+
+Or use the included `docker-compose.yml` to run MongoDB + the app:
+
+```bash
+docker compose up --build
+```
+
+## Tools / API
+
+This project exposes several MCP tools for managing memories and context. Key tools include:
+
+- `save-memories` — Save (overwrite) memories
+- `add-memories` — Append new memories
+- `get-memories` — Retrieve all memories
+- `clear-memories` — Clear stored memories
+- `archive-context` — Archive context for conversation
+- `retrieve-context` — Retrieve relevant archived context
+- `score-relevance` — Score relevance of archived content
+- `create-summary` — Create a summary and link to context
+
+See the code in `src/` for full parameter lists and examples.
+
+## Development notes
+
+- Build: `npm run build` (uses `tsc`)
+- Start: `npm start` (runs `node build/index.js`)
+- CLI: `npm run cli` (runs `node build/cli.js`)
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit and push your changes
+4. Open a pull request against `main`
+
+If you need a PR created from your local branch, I can help automate that.
+
 ## License
 
 ISC
+
+## Acknowledgements
+
+Thanks to the upstream project and contributors whose work inspired and enabled this repository. Special thanks to the maintainers of the original Memory MCP implementation and to anyone who contributed ideas, patches, or reviews. Your work makes projects like this possible.
