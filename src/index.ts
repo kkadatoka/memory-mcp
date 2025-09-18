@@ -874,6 +874,18 @@ app.post('/messages', async (req: Request, res: Response) => {
   const body = req.body || {};
   const tool = body.tool || body.method || (body.params && body.params.tool);
   const args = body.args || body.params || {};
+  // Support Streamable HTTP / SSE initialize handshake used by some clients.
+  // If the client posts { method: 'initialize' } or { tool: 'initialize' }
+  // return a session id and the messages endpoint so they can open a stream.
+  if ((body.method && body.method === 'initialize') || (body.tool && body.tool === 'initialize')) {
+    const sessionId = new ObjectId().toHexString();
+    const endpoint = `/messages/?session_id=${sessionId}`;
+    // If JSON-RPC style, return jsonrpc structure
+    if (body?.jsonrpc === '2.0') {
+      return res.json({ jsonrpc: '2.0', result: { sessionId, endpoint }, id: body.id || null });
+    }
+    return res.json({ sessionId, endpoint });
+  }
   if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
   try {
     const result = await invokeToolByName(tool, args || {});
