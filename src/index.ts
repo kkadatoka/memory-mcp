@@ -666,23 +666,112 @@ app.post("/tools/call", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Missing 'tool' in request body" });
   }
   try {
-    if ((server as any)._tools && (server as any)._tools[tool]) {
-      const result = await (server as any)._tools[tool].handler(args || {}, {});
+    // Try multiple invocation strategies to maximize compatibility with different SDK shapes
+    const registries = [
+      (server as any)._tools,
+      (server as any).tools,
+      (server as any).toolRegistry,
+      (server as any).registry,
+      (server as any)._toolRegistry,
+      (server as any).registeredTools,
+      (server as any)._registeredTools,
+    ];
 
-      // Broadcast over SSE as well
+    // Helper to attempt invoking a tool object
+    const tryInvokeFromObj = async (obj: any) => {
+      if (!obj) return null;
       try {
-        const payload = { tool, params: args || {}, result };
-        const data = JSON.stringify(payload);
-        sseClients.forEach((c) => {
-          try {
-            c.res.write(`event: tool-result\n`);
-            c.res.write(`data: ${data}\n\n`);
-          } catch (e) {}
-        });
-      } catch (e) {}
+        if (typeof obj.handler === 'function') return await obj.handler(args || {}, {});
+        if (typeof obj.call === 'function') return await obj.call(args || {}, {});
+        if (typeof obj.run === 'function') return await obj.run(args || {}, {});
+      } catch (e) {
+        // bubble up
+        throw e;
+      }
+      return null;
+    };
 
-      return res.json(result);
+    // 1) Search known registries
+    for (const reg of registries) {
+      try {
+        if (!reg || typeof reg !== 'object') continue;
+        if (reg[tool]) {
+          const result = await tryInvokeFromObj(reg[tool]);
+          if (result !== null) {
+            // Broadcast over SSE as well
+            try {
+              const payload = { tool, params: args || {}, result };
+              const data = JSON.stringify(payload);
+              sseClients.forEach((c) => {
+                try {
+                  c.res.write(`event: tool-result\n`);
+                  c.res.write(`data: ${data}\n\n`);
+                } catch (e) {}
+              });
+            } catch (e) {}
+            return res.json(result);
+          }
+        }
+      } catch (e) {}
     }
+
+    // 2) Try server-level convenience methods (call/invoke/execute)
+    const serverCallCandidates = [
+      (server as any).call,
+      (server as any).invoke,
+      (server as any).execute,
+      (server as any).handle,
+    ];
+    for (const fn of serverCallCandidates) {
+      try {
+        if (typeof fn === 'function') {
+          const maybe = await fn.call(server, tool, args || {});
+          if (maybe !== undefined) {
+            return res.json(maybe);
+          }
+        }
+      } catch (e) {
+        // if server-level call exists but errors, return 500
+        const ee: any = e;
+        return res.status(500).json({ error: (ee && ee.message) || String(ee) });
+      }
+    }
+
+    // 3) As a last resort, recursively scan the server object for a tool-like object with matching name
+    const visited = new Set<any>();
+    let foundObj: any = null;
+    const walkFind = (node: any, depth = 0) => {
+      if (!node || depth > 4) return;
+      if (visited.has(node)) return;
+      visited.add(node);
+      if (typeof node === 'object') {
+        for (const [k, v] of Object.entries(node)) {
+          try {
+            const vv: any = v as any;
+            if (k === tool || (vv && vv.name === tool)) {
+              if (vv && (typeof vv.handler === 'function' || typeof vv.call === 'function' || typeof vv.run === 'function')) {
+                foundObj = vv; return;
+              }
+            }
+          } catch (e) {}
+        }
+        for (const v of Object.values(node)) {
+          try { if (typeof v === 'object') walkFind(v, depth + 1); } catch (e) {}
+          if (foundObj) return;
+        }
+      }
+    };
+    try { walkFind(server, 0); } catch (e) {}
+    if (foundObj) {
+      try {
+        const result = await tryInvokeFromObj(foundObj);
+        return res.json(result);
+      } catch (e: any) {
+        return res.status(500).json({ error: e.message || String(e) });
+      }
+    }
+
+    // Not found
     res.status(404).json({ error: `Tool '${tool}' not found` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
