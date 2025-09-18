@@ -589,6 +589,44 @@ app.post("/mcp/:tool", async (req, res) => {
   }
 });
 
+// Endpoint to list available tools (discovery for HTTP/SSE clients)
+app.get("/mcp/tools", (req, res) => {
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.json({ tools });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST variant for clients that prefer JSON body (keeps parity with /mcp/:tool)
+app.post("/mcp/list-tools", (req, res) => {
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.json({ tools });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(serverPort, () => {
   console.error(`Unified HTTP server (MCP + SSE) listening on port ${serverPort}`);
 });
