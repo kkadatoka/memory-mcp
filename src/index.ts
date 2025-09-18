@@ -614,6 +614,49 @@ app.get("/sse", (req: Request, res: Response) => {
   });
 });
 
+// Support Streamable HTTP clients that POST to /sse for initialize or to invoke
+// tools over HTTP while receiving results via existing SSE connections. Some
+// clients attempt to POST /sse (instead of /messages) during initialization,
+// return a sessionId+endpoint when asked to initialize, and accept {tool,args}
+// shapes for invocation. Implement a small, safe compatibility shim here.
+app.post('/sse', async (req: Request, res: Response) => {
+  const body = req.body || {};
+  // Initialize handshake
+  if ((body.method && body.method === 'initialize') || (body.tool && body.tool === 'initialize')) {
+    const sessionId = new ObjectId().toHexString();
+    const endpoint = `/messages/?session_id=${sessionId}`;
+    if (body?.jsonrpc === '2.0') {
+      return res.json({ jsonrpc: '2.0', result: { sessionId, endpoint }, id: body.id || null });
+    }
+    return res.json({ sessionId, endpoint });
+  }
+
+  // If client posts a tool invocation to /sse, try to invoke and broadcast
+  const tool = body.tool || body.method || (body.params && body.params.tool);
+  const args = body.args || body.params || {};
+  if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
+  try {
+    const result = await invokeToolByName(tool, args || {});
+    if (result === null || result === undefined) return res.status(404).json({ error: `Tool '${tool}' not found` });
+
+    // Broadcast result to SSE clients as 'tool-result' event
+    try {
+      const payload = { tool, params: args || {}, result };
+      const data = JSON.stringify(payload);
+      sseClients.forEach((c) => {
+        try {
+          c.res.write(`event: tool-result\n`);
+          c.res.write(`data: ${data}\n\n`);
+        } catch (e) {}
+      });
+    } catch (e) {}
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
 // A compatibility endpoint used by some MCP clients: they open an SSE stream
 // on `/messages/?session_id=...`. Mirror the same behaviour as `/sse` but
 // allow clients to supply their own session_id.
@@ -664,6 +707,14 @@ app.post("/mcp/:tool", async (req: Request, res: Response) => {
   const toolName = req.params.tool as string;
   const params = req.body;
   try {
+    // If the client posted to /mcp/list-tools (or similar discovery aliases)
+    // return the discovery list immediately instead of attempting to invoke
+    // a tool named "list-tools" which likely does not exist as an executable
+    // tool. This preserves compatibility with clients that prefer POST+JSON.
+    if (toolName === 'list-tools' || toolName === 'tools' || toolName === 'list') {
+      const tools = discoverTools();
+      return res.json(tools);
+    }
     // Prefer the invocation helper which knows how to call local handlers
     // and various SDK registry shapes. This ensures /mcp/:tool works even
     // when the SDK stores only metadata objects (no direct handler ref).
