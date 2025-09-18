@@ -53,9 +53,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Docker CLI
-        uses: docker/setup-cli@v3
-
       - name: Login to GHCR
         uses: docker/login-action@v2
         with:
@@ -67,15 +64,17 @@ jobs:
         run: |
           docker pull ghcr.io/${{ github.repository_owner }}/memory-mcp:latest
 
+      - name: Create docker network
+        run: |
+          docker network create smoke-net || true
+
       - name: Start MongoDB
         run: |
-          docker run -d --name smoke-mongo -p 27017:27017 mongo:6.0
+          docker run -d --name smoke-mongo --network smoke-net -p 27017:27017 mongo:6.0
 
       - name: Start memory-mcp app
-        env:
-          MONGODB_URI: mongodb://host.docker.internal:27017/memorydb
         run: |
-          docker run -d --name smoke-memory-mcp --network host -e MONGODB_URI="mongodb://localhost:27017/memorydb" ghcr.io/${{ github.repository_owner }}/memory-mcp:latest
+          docker run -d --name smoke-memory-mcp --network smoke-net -p 3000:3000 -e MONGODB_URI="mongodb://smoke-mongo:27017/memorydb" ghcr.io/${{ github.repository_owner }}/memory-mcp:latest
 
       - name: Wait for app to be reachable
         run: |
