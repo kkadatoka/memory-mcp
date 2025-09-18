@@ -1,0 +1,27 @@
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: memory-mcp-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: memorydb
+    volumes:
+      - mongo_data:/data/db
+
+  memory-mcp:
+    build: .
+    container_name: memory-mcp-app
+    restart: always
+    depends_on:
+      - mongodb
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/memorydb
+    ports:
+      - "3000:3000" # Adjust if your app listens on a different port
+    # Uncomment if you want to run in development mode
+    # command: npm run dev
+
+volumes:
+  mongo_data:
