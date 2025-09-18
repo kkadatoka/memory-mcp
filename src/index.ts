@@ -781,6 +781,56 @@ function discoverTools() {
     // ignore call errors
   }
 
+  // Extra fallback: recursively scan server object for tool-like shapes
+  try {
+    const maxDepth = 3;
+    const visited = new Set<any>();
+
+    const looksLikeTool = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return false;
+      // Look for handler/call/run functions or a schema
+      if (typeof obj.handler === 'function') return true;
+      if (typeof obj.call === 'function' || typeof obj.run === 'function') return true;
+      if (obj.schema || obj.inputSchema || obj.args || obj.parameters) return true;
+      return false;
+    };
+
+    const walk = (node: any, depth = 0) => {
+      if (!node || depth > maxDepth) return;
+      if (visited.has(node)) return;
+      visited.add(node);
+
+      try {
+        // If it's an object mapping names to tool-like entries, add them
+        if (typeof node === 'object') {
+          for (const [k, vRaw] of Object.entries(node)) {
+            const v: any = vRaw as any;
+            try {
+              if (looksLikeTool(v)) {
+                // use key as name if v has no explicit name
+                  const name = (v && v.name) || k;
+                  pushMeta(name, v);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+
+      // Recurse into own property values
+      try {
+        for (const v of Object.values(node)) {
+          try {
+            if (typeof v === 'object') walk(v, depth + 1);
+          } catch (e) {}
+        }
+      } catch (e) {}
+    };
+
+    walk(server, 0);
+  } catch (e) {
+    // ignore
+  }
+
   return out;
 }
 
