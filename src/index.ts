@@ -708,6 +708,14 @@ app.post("/tools/call", async (req: Request, res: Response) => {
     };
 
     // 1) Search known registries
+    // Prefer locally captured handlers first
+    try {
+      if (_localToolHandlers[tool]) {
+        const result = await _localToolHandlers[tool](args || {}, {});
+        return res.json(result);
+      }
+    } catch (e) {}
+
     for (const reg of registries) {
       try {
         if (!reg || typeof reg !== 'object') continue;
