@@ -664,13 +664,14 @@ app.post("/mcp/:tool", async (req: Request, res: Response) => {
   const toolName = req.params.tool as string;
   const params = req.body;
   try {
-    // Use MCP SDK internal _tools registry
-    if ((server as any)._tools && (server as any)._tools[toolName]) {
-      const result = await (server as any)._tools[toolName].handler(params, {});
-      res.json(result);
-    } else {
-      res.status(404).json({ error: `Tool '${toolName}' not found` });
+    // Prefer the invocation helper which knows how to call local handlers
+    // and various SDK registry shapes. This ensures /mcp/:tool works even
+    // when the SDK stores only metadata objects (no direct handler ref).
+    const result = await invokeToolByName(toolName, params || {});
+    if (result !== null && result !== undefined) {
+      return res.json(result);
     }
+    return res.status(404).json({ error: `Tool '${toolName}' not found` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
