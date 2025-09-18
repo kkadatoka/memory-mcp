@@ -854,6 +854,99 @@ app.post("/mcp/list-tools", (req: Request, res: Response) => {
   }
 });
 
+// Debug endpoint (read-only) to inspect the internal objects used during discovery.
+// This is intended for development/troubleshooting only — do not expose in production.
+app.get('/debug/_tool_internals', (req: Request, res: Response) => {
+  try {
+    // Collect the raw candidate locations
+    const candidates: Record<string, any> = {
+      '_tools': (server as any)._tools,
+      'tools': (server as any).tools,
+      'toolRegistry': (server as any).toolRegistry,
+      'registry': (server as any).registry,
+      '_toolRegistry': (server as any)._toolRegistry,
+      'registeredTools': (server as any).registeredTools,
+      '_registeredTools': (server as any)._registeredTools,
+    };
+
+    // Helper to create a JSON-safe shallow summary of an object
+    const summarize = (obj: any) => {
+      if (obj == null) return null;
+      if (typeof obj !== 'object') return obj;
+      const out: any = {};
+      try {
+        for (const [k, vRaw] of Object.entries(obj)) {
+          try {
+            const v: any = vRaw as any;
+            const entry: any = { type: typeof v };
+            if (v && typeof v === 'object') {
+              if (v.schema) entry.schemaKeys = Object.keys(v.schema || {});
+              if (v.inputSchema) entry.inputSchemaKeys = Object.keys(v.inputSchema || {});
+              if (v.args) entry.argsKeys = Object.keys(v.args || {});
+              if (v.parameters) entry.parametersKeys = Object.keys(v.parameters || {});
+              entry.hasHandler = !!(v.handler || v.call || v.run);
+            }
+            out[k] = entry;
+          } catch (e) {
+            out[k] = { type: typeof vRaw, error: 'summary-error' };
+          }
+        }
+      } catch (e) {
+        return { error: 'summarize-failed' };
+      }
+      return out;
+    };
+
+    const candidateSummaries: Record<string, any> = {};
+    for (const [k, v] of Object.entries(candidates)) {
+      candidateSummaries[k] = summarize(v as any);
+    }
+
+    // Run the recursive scan used by discoverTools but record the raw matches found
+    const rawMatches: Array<{ name: string; metaSample: any }> = [];
+    try {
+      const visited = new Set<any>();
+      const maxDepth = 3;
+      const looksLikeTool = (obj: any) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (typeof obj.handler === 'function') return true;
+        if (typeof obj.call === 'function' || typeof obj.run === 'function') return true;
+        if (obj.schema || obj.inputSchema || obj.args || obj.parameters) return true;
+        return false;
+      };
+
+      const walk = (node: any, depth = 0) => {
+        if (!node || depth > maxDepth) return;
+        if (visited.has(node)) return;
+        visited.add(node);
+        if (typeof node === 'object') {
+          for (const [k, v] of Object.entries(node)) {
+            try {
+              const vv: any = v as any;
+              if (looksLikeTool(vv)) {
+                rawMatches.push({ name: vv.name || k, metaSample: summarize({ sample: vv }) });
+              }
+            } catch (e) {}
+          }
+        }
+        try {
+          for (const v of Object.values(node)) {
+            try {
+              if (typeof v === 'object') walk(v, depth + 1);
+            } catch (e) {}
+          }
+        } catch (e) {}
+      };
+
+      walk(server, 0);
+    } catch (e) {}
+
+    res.json({ candidates: candidateSummaries, rawMatches });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(serverPort, () => {
   console.error(`Unified HTTP server (MCP + SSE) listening on port ${serverPort}`);
 });
