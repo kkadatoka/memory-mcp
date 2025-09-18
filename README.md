@@ -103,3 +103,16 @@ Thanks to the upstream project [JamesANZ/memory-mcp](https://github.com/JamesANZ
 ## License
 
 ISC
+
+## Test scripts
+
+There is a small Python smoke-test script that exercises the discovery endpoints and attempts a basic tool invocation. It can help validate the server returns a plain array for `tools/list` and that canonical invocation endpoints work.
+
+Install dependencies and run the test:
+
+```bash
+python3 -m pip install -r scripts/requirements.txt
+python3 scripts/test_discovery.py --url http://localhost:3000
+```
+
+The script exits with non-zero status when critical checks fail.
