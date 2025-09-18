@@ -561,18 +561,9 @@ app.get("/sse", (req: Request, res: Response) => {
 
   // On connect, send available tools as a named event so clients can discover capabilities
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
-      }
-    }
+    const tools = discoverTools();
     res.write(`event: tools\n`);
-    res.write(`data: ${JSON.stringify({ tools })}\n\n`);
+    res.write(`data: ${JSON.stringify(tools)}\n\n`);
   } catch (err) {
     // ignore discovery errors for SSE
   }
@@ -592,17 +583,8 @@ app.get("/sse", (req: Request, res: Response) => {
 // SSE clients may also request the tools list over HTTP
 app.get("/sse/list-tools", (req: Request, res: Response) => {
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
-      }
-    }
-    res.json({ tools });
+    const tools = discoverTools();
+    res.json(tools);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -662,17 +644,8 @@ app.post("/sse/:tool", async (req: Request, res: Response) => {
 // Canonical MCP endpoints (tools/list and tools/call) for compatibility with MCP clients
 app.get("/tools/list", (req, res) => {
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
-      }
-    }
-    res.json({ tools });
+    const tools = discoverTools();
+    res.json(tools);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -680,17 +653,8 @@ app.get("/tools/list", (req, res) => {
 
 app.post("/tools/list", (req: Request, res: Response) => {
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
-      }
-    }
-    res.json({ tools });
+    const tools = discoverTools();
+    res.json(tools);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -726,19 +690,105 @@ app.post("/tools/call", async (req: Request, res: Response) => {
 });
 
 // Endpoint to list available tools (discovery for HTTP/SSE clients)
-app.get("/mcp/tools", (req: Request, res: Response) => {
+// Helper: discover registered tools from the MCP SDK instance
+function discoverTools() {
+  const seen = new Set<string>();
+  const out: Array<{ name: string; description: string; params: string[] }> = [];
+
+  // Candidate places the SDK might store tool metadata in different versions
+  const candidates = [
+    (server as any)._tools,
+    (server as any).tools,
+    (server as any).toolRegistry,
+    (server as any).registry,
+    (server as any)._toolRegistry,
+    (server as any).registeredTools,
+    (server as any)._registeredTools,
+  ];
+
+  const pushMeta = (name: string, meta: any) => {
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+
+    const m: any = meta || {};
+    const description = m.description || m.desc || m.title || m.summary || "";
+
+    let params: string[] = [];
+    try {
+      // Zod schema shape
+      if (m.schema && m.schema._def && m.schema._def.shape) {
+        params = Object.keys(m.schema._def.shape);
+      } else if (m.inputSchema && m.inputSchema._def && m.inputSchema._def.shape) {
+        params = Object.keys(m.inputSchema._def.shape);
+      }
+
+      // JSON Schema shape
+      else if (m.schema && m.schema.properties) {
+        params = Object.keys(m.schema.properties);
+      } else if (m.inputSchema && m.inputSchema.properties) {
+        params = Object.keys(m.inputSchema.properties);
+      }
+
+      // SDK older shapes: args / parameters
+      else if (m.args && typeof m.args === "object") {
+        params = Object.keys(m.args);
+      } else if (m.parameters && typeof m.parameters === "object") {
+        params = Object.keys(m.parameters);
+      }
+    } catch (e) {
+      // ignore schema parsing errors
+    }
+
+    out.push({ name, description, params });
+  };
+
+  for (const reg of candidates) {
+    if (!reg) continue;
+    try {
+      // If it's an array of tool descriptors
+      if (Array.isArray(reg)) {
+        for (const item of reg) {
+          if (!item) continue;
+          if (typeof item === "string") pushMeta(item, {});
+          else if (item.name) pushMeta(item.name, item);
+        }
+        continue;
+      }
+
+      // If it's a map/object of name -> meta
+      if (typeof reg === "object") {
+        for (const [name, meta] of Object.entries(reg)) {
+          pushMeta(name, meta as any);
+        }
+      }
+    } catch (e) {
+      // ignore and continue
+    }
+  }
+
+  // Try calling any exported helper/listing on the server instance
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
+    const maybeList = (server as any).listTools?.() || (server as any).list?.() || (server as any)._list?.();
+    if (Array.isArray(maybeList) && maybeList.length > 0) {
+      // Normalize items to our descriptor shape
+      for (const item of maybeList) {
+        if (!item) continue;
+        if (typeof item === "string") pushMeta(item, {});
+        else if (item.name) pushMeta(item.name, item);
       }
     }
-    res.json({ tools });
+  } catch (e) {
+    // ignore call errors
+  }
+
+  return out;
+}
+
+// Return tools as a plain array per MCP spec
+app.get("/mcp/tools", (req: Request, res: Response) => {
+  try {
+    const tools = discoverTools();
+    res.json(tools);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -747,17 +797,8 @@ app.get("/mcp/tools", (req: Request, res: Response) => {
 // POST variant for clients that prefer JSON body (keeps parity with /mcp/:tool)
 app.post("/mcp/list-tools", (req: Request, res: Response) => {
   try {
-    const tools: Array<{ name: string; description: string; params: string[] }> = [];
-    if ((server as any)._tools) {
-      for (const [name, meta] of Object.entries((server as any)._tools)) {
-        tools.push({
-          name,
-          description: (meta as any).description || "",
-          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
-        });
-      }
-    }
-    res.json({ tools });
+    const tools = discoverTools();
+    res.json(tools);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
