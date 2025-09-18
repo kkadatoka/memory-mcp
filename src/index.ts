@@ -561,6 +561,9 @@ server.tool(
 
 
 const app = express();
+// permissive CORS for LM Studio / remote clients
+import cors from 'cors';
+app.use(cors());
 const serverPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 // SSE clients
@@ -682,123 +685,98 @@ app.post("/tools/call", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Missing 'tool' in request body" });
   }
   try {
-    // Try multiple invocation strategies to maximize compatibility with different SDK shapes
-    const registries = [
-      (server as any)._tools,
-      (server as any).tools,
-      (server as any).toolRegistry,
-      (server as any).registry,
-      (server as any)._toolRegistry,
-      (server as any).registeredTools,
-      (server as any)._registeredTools,
-    ];
-
-    // Helper to attempt invoking a tool object
-    const tryInvokeFromObj = async (obj: any) => {
-      if (!obj) return null;
+    const invokeToolByName = async (name: string, payload: any) => {
+      // prefer locally captured handlers
       try {
-        if (typeof obj.handler === 'function') return await obj.handler(args || {}, {});
-        if (typeof obj.call === 'function') return await obj.call(args || {}, {});
-        if (typeof obj.run === 'function') return await obj.run(args || {}, {});
-      } catch (e) {
-        // bubble up
-        throw e;
+        if (_localToolHandlers[name]) return await _localToolHandlers[name](payload || {}, {});
+      } catch (e) {}
+
+      const registries = [
+        (server as any)._tools,
+        (server as any).tools,
+        (server as any).toolRegistry,
+        (server as any).registry,
+        (server as any)._toolRegistry,
+        (server as any).registeredTools,
+        (server as any)._registeredTools,
+      ];
+
+      const tryInvokeFromObj = async (obj: any) => {
+        if (!obj) return null;
+        if (typeof obj.handler === 'function') return await obj.handler(payload || {}, {});
+        if (typeof obj.call === 'function') return await obj.call(payload || {}, {});
+        if (typeof obj.run === 'function') return await obj.run(payload || {}, {});
+        return null;
+      };
+
+      for (const reg of registries) {
+        try {
+          if (!reg || typeof reg !== 'object') continue;
+          if (reg[name]) {
+            const r = await tryInvokeFromObj(reg[name]);
+            if (r !== null) return r;
+          }
+        } catch (e) {}
       }
+
+      const serverCallCandidates = [(server as any).call, (server as any).invoke, (server as any).execute, (server as any).handle];
+      for (const fn of serverCallCandidates) {
+        try {
+          if (typeof fn === 'function') {
+            const maybe = await fn.call(server, name, payload || {});
+            if (maybe !== undefined) return maybe;
+          }
+        } catch (e) {}
+      }
+
+      // recursive find
+      const visited = new Set<any>();
+      let foundObj: any = null;
+      const walkFind = (node: any, depth = 0) => {
+        if (!node || depth > 4) return;
+        if (visited.has(node)) return;
+        visited.add(node);
+        if (typeof node === 'object') {
+          for (const [k, v] of Object.entries(node)) {
+            try {
+              const vv: any = v as any;
+              if (k === name || (vv && vv.name === name)) {
+                if (vv && (typeof vv.handler === 'function' || typeof vv.call === 'function' || typeof vv.run === 'function')) {
+                  foundObj = vv; return;
+                }
+              }
+            } catch (e) {}
+          }
+          for (const v of Object.values(node)) {
+            try { if (typeof v === 'object') walkFind(v, depth + 1); } catch (e) {}
+            if (foundObj) return;
+          }
+        }
+      };
+      try { walkFind(server, 0); } catch (e) {}
+      if (foundObj) return await tryInvokeFromObj(foundObj);
+
       return null;
     };
 
-    // 1) Search known registries
-    // Prefer locally captured handlers first
-    try {
-      if (_localToolHandlers[tool]) {
-        const result = await _localToolHandlers[tool](args || {}, {});
-        return res.json(result);
-      }
-    } catch (e) {}
-
-    for (const reg of registries) {
+    const result = await invokeToolByName(tool, args || {});
+    if (result !== null && result !== undefined) {
       try {
-        if (!reg || typeof reg !== 'object') continue;
-        if (reg[tool]) {
-          const result = await tryInvokeFromObj(reg[tool]);
-          if (result !== null) {
-            // Broadcast over SSE as well
-            try {
-              const payload = { tool, params: args || {}, result };
-              const data = JSON.stringify(payload);
-              sseClients.forEach((c) => {
-                try {
-                  c.res.write(`event: tool-result\n`);
-                  c.res.write(`data: ${data}\n\n`);
-                } catch (e) {}
-              });
-            } catch (e) {}
-            return res.json(result);
-          }
-        }
-      } catch (e) {}
-    }
-
-    // 2) Try server-level convenience methods (call/invoke/execute)
-    const serverCallCandidates = [
-      (server as any).call,
-      (server as any).invoke,
-      (server as any).execute,
-      (server as any).handle,
-    ];
-    for (const fn of serverCallCandidates) {
-      try {
-        if (typeof fn === 'function') {
-          const maybe = await fn.call(server, tool, args || {});
-          if (maybe !== undefined) {
-            return res.json(maybe);
-          }
-        }
-      } catch (e) {
-        // if server-level call exists but errors, return 500
-        const ee: any = e;
-        return res.status(500).json({ error: (ee && ee.message) || String(ee) });
-      }
-    }
-
-    // 3) As a last resort, recursively scan the server object for a tool-like object with matching name
-    const visited = new Set<any>();
-    let foundObj: any = null;
-    const walkFind = (node: any, depth = 0) => {
-      if (!node || depth > 4) return;
-      if (visited.has(node)) return;
-      visited.add(node);
-      if (typeof node === 'object') {
-        for (const [k, v] of Object.entries(node)) {
+        const payload = { tool, params: args || {}, result };
+        const data = JSON.stringify(payload);
+        sseClients.forEach((c) => {
           try {
-            const vv: any = v as any;
-            if (k === tool || (vv && vv.name === tool)) {
-              if (vv && (typeof vv.handler === 'function' || typeof vv.call === 'function' || typeof vv.run === 'function')) {
-                foundObj = vv; return;
-              }
-            }
+            c.res.write(`event: tool-result\n`);
+            c.res.write(`data: ${data}\n\n`);
           } catch (e) {}
-        }
-        for (const v of Object.values(node)) {
-          try { if (typeof v === 'object') walkFind(v, depth + 1); } catch (e) {}
-          if (foundObj) return;
-        }
-      }
-    };
-    try { walkFind(server, 0); } catch (e) {}
-    if (foundObj) {
-      try {
-        const result = await tryInvokeFromObj(foundObj);
-        return res.json(result);
-      } catch (e: any) {
-        return res.status(500).json({ error: e.message || String(e) });
-      }
+        });
+      } catch (e) {}
+      return res.json(result);
     }
 
-    // Not found
-    res.status(404).json({ error: `Tool '${tool}' not found` });
+    return res.status(404).json({ error: `Tool '${tool}' not found` });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || String(err) });
   }
 });
 
