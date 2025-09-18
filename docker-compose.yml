@@ -11,7 +11,8 @@ services:
       - mongo_data:/data/db
 
   memory-mcp:
-    build: .
+    #build: .
+    image: ghcr.io/kkadatoka/memory-mcp:latest # Use the image built and pushed to GitHub Container Registry
     container_name: memory-mcp-app
     restart: always
     depends_on:
