@@ -31,6 +31,22 @@ const server = new McpServer({
   },
 });
 
+// Capture tool handlers when tools are registered so we can invoke them even if
+// the SDK stores only metadata in other properties at runtime.
+const _localToolHandlers: Record<string, any> = {};
+if (typeof (server as any).tool === 'function') {
+  const _origTool = (server as any).tool.bind(server);
+  (server as any).tool = function (name: string, description: string, schema: any, handler: any) {
+    try {
+      if (name && typeof handler === 'function') {
+        _localToolHandlers[name] = handler;
+      }
+    } catch (e) {}
+    // Call original registration
+    return _origTool(name, description, schema, handler);
+  } as any;
+}
+
 // Tool to save memories (overwrites existing ones)
 server.tool(
   "save-memories",
