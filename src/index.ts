@@ -1,6 +1,8 @@
+// SSE handler and variables at top-level scope
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import express from "express";
 import { z } from "zod";
+import { EventEmitter } from "events";
 import { ObjectId } from "mongodb";
 import {
   connect,
@@ -149,9 +151,8 @@ server.tool(
         ],
       };
     }
-  },
+  }
 );
-
 // Tool to clear all memories
 server.tool(
   "clear-memories",
@@ -542,31 +543,54 @@ server.tool(
   },
 );
 
-async function main() {
+
+const app = express();
+const serverPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
+// SSE clients
+const sseClients: Array<{ res: express.Response }> = [];
+
+app.get("/sse", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+  });
+  res.write("retry: 10000\n\n");
+  sseClients.push({ res });
+
+  const interval = setInterval(() => {
+    res.write(`data: ${JSON.stringify({ message: "Hello from SSE!" })}\n\n`);
+  }, 5000);
+
+  req.on("close", () => {
+    clearInterval(interval);
+    const idx = sseClients.findIndex((c) => c.res === res);
+    if (idx !== -1) sseClients.splice(idx, 1);
+    res.end();
+  });
+});
+
+app.use(express.json());
+
+app.post("/mcp/:tool", async (req, res) => {
+  const toolName = req.params.tool;
+  const params = req.body;
   try {
-    await connect();
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error("Memory MCP server started successfully");
-  } catch (error) {
-    console.error("Failed to start Memory MCP server:", error);
-    process.exit(1);
+    // Use MCP SDK internal _tools registry
+    if ((server as any)._tools && (server as any)._tools[toolName]) {
+      const result = await (server as any)._tools[toolName].handler(params, {});
+      res.json(result);
+    } else {
+      res.status(404).json({ error: `Tool '${toolName}' not found` });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
-}
-
-process.on("SIGINT", async () => {
-  console.error("Shutting down Memory MCP server...");
-  await closeDatabase();
-  process.exit(0);
 });
 
-process.on("SIGTERM", async () => {
-  console.error("Shutting down Memory MCP server...");
-  await closeDatabase();
-  process.exit(0);
+app.listen(serverPort, () => {
+  console.error(`Unified HTTP server (MCP + SSE) listening on port ${serverPort}`);
 });
 
-main().catch((error) => {
-  console.error("Unhandled error:", error);
-  process.exit(1);
-});
+
