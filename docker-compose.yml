@@ -19,7 +19,7 @@ services:
     environment:
       MONGODB_URI: mongodb://mongodb:27017/memorydb
     ports:
-      - "3000:3000" # Adjust if your app listens on a different port
+      - "8097:3000" # Adjust if your app listens on a different port
     # Uncomment if you want to run in development mode
     # command: npm run dev
 

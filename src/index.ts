@@ -566,8 +566,8 @@ import cors from 'cors';
 app.use(cors());
 const serverPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
-// SSE clients
-const sseClients: Array<{ res: express.Response }> = [];
+// SSE clients (track optional sessionId for /messages/ compatibility)
+const sseClients: Array<{ res: express.Response; sessionId?: string }> = [];
 
 app.get("/sse", (req: Request, res: Response) => {
   res.set({
@@ -576,10 +576,21 @@ app.get("/sse", (req: Request, res: Response) => {
     "Connection": "keep-alive",
   });
   res.write("retry: 10000\n\n");
-  sseClients.push({ res });
+  // Create a short-lived session identifier for clients that expect an endpoint
+  const sessionId = new ObjectId().toHexString();
+  const endpointPath = `/messages/?session_id=${sessionId}`;
+  sseClients.push({ res, sessionId });
 
   // On connect, send available tools as a named event so clients can discover capabilities
   try {
+    // First inform clients where a message stream endpoint is (many MCP SSE servers
+    // send an `endpoint` event with a path like `/messages/?session_id=...`).
+    // Send endpoint as a raw string (no JSON quoting) so clients that expect
+    // `data: /messages/?session_id=...` receive the same format.
+    res.write(`event: endpoint\n`);
+    res.write(`data: ${endpointPath}\n\n`);
+
+    // Then send available tools for discovery
     const tools = discoverTools();
     res.write(`event: tools\n`);
     res.write(`data: ${JSON.stringify(tools)}\n\n`);
@@ -588,12 +599,50 @@ app.get("/sse", (req: Request, res: Response) => {
   }
 
   const interval = setInterval(() => {
-    res.write(`data: ${JSON.stringify({ message: "Hello from SSE!" })}\n\n`);
-  }, 5000);
+    // Emit a comment-style ping line many servers use for keepalive. This
+    // appears as lines beginning with ':' in curl output.
+    try {
+      res.write(`: ping - ${new Date().toISOString()}\n\n`);
+    } catch (e) {}
+  }, 15000);
 
   req.on("close", () => {
     clearInterval(interval);
     const idx = sseClients.findIndex((c) => c.res === res);
+    if (idx !== -1) sseClients.splice(idx, 1);
+    res.end();
+  });
+});
+
+// A compatibility endpoint used by some MCP clients: they open an SSE stream
+// on `/messages/?session_id=...`. Mirror the same behaviour as `/sse` but
+// allow clients to supply their own session_id.
+app.get('/messages/', (req: Request, res: Response) => {
+  const sessionId = String(req.query.session_id || new ObjectId().toHexString());
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.write('retry: 10000\n\n');
+  sseClients.push({ res, sessionId });
+
+  try {
+    // Inform client of the tools immediately after connect
+    const tools = discoverTools();
+    res.write(`event: tools\n`);
+    res.write(`data: ${JSON.stringify(tools)}\n\n`);
+  } catch (e) {}
+
+    const interval = setInterval(() => {
+      try {
+        res.write(`: ping - ${new Date().toISOString()}\n\n`);
+      } catch (e) {}
+    }, 15000);
+
+  req.on('close', () => {
+    clearInterval(interval);
+    const idx = sseClients.findIndex((c) => c.res === res && c.sessionId === sessionId);
     if (idx !== -1) sseClients.splice(idx, 1);
     res.end();
   });
@@ -685,80 +734,6 @@ app.post("/tools/call", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Missing 'tool' in request body" });
   }
   try {
-    const invokeToolByName = async (name: string, payload: any) => {
-      // prefer locally captured handlers
-      try {
-        if (_localToolHandlers[name]) return await _localToolHandlers[name](payload || {}, {});
-      } catch (e) {}
-
-      const registries = [
-        (server as any)._tools,
-        (server as any).tools,
-        (server as any).toolRegistry,
-        (server as any).registry,
-        (server as any)._toolRegistry,
-        (server as any).registeredTools,
-        (server as any)._registeredTools,
-      ];
-
-      const tryInvokeFromObj = async (obj: any) => {
-        if (!obj) return null;
-        if (typeof obj.handler === 'function') return await obj.handler(payload || {}, {});
-        if (typeof obj.call === 'function') return await obj.call(payload || {}, {});
-        if (typeof obj.run === 'function') return await obj.run(payload || {}, {});
-        return null;
-      };
-
-      for (const reg of registries) {
-        try {
-          if (!reg || typeof reg !== 'object') continue;
-          if (reg[name]) {
-            const r = await tryInvokeFromObj(reg[name]);
-            if (r !== null) return r;
-          }
-        } catch (e) {}
-      }
-
-      const serverCallCandidates = [(server as any).call, (server as any).invoke, (server as any).execute, (server as any).handle];
-      for (const fn of serverCallCandidates) {
-        try {
-          if (typeof fn === 'function') {
-            const maybe = await fn.call(server, name, payload || {});
-            if (maybe !== undefined) return maybe;
-          }
-        } catch (e) {}
-      }
-
-      // recursive find
-      const visited = new Set<any>();
-      let foundObj: any = null;
-      const walkFind = (node: any, depth = 0) => {
-        if (!node || depth > 4) return;
-        if (visited.has(node)) return;
-        visited.add(node);
-        if (typeof node === 'object') {
-          for (const [k, v] of Object.entries(node)) {
-            try {
-              const vv: any = v as any;
-              if (k === name || (vv && vv.name === name)) {
-                if (vv && (typeof vv.handler === 'function' || typeof vv.call === 'function' || typeof vv.run === 'function')) {
-                  foundObj = vv; return;
-                }
-              }
-            } catch (e) {}
-          }
-          for (const v of Object.values(node)) {
-            try { if (typeof v === 'object') walkFind(v, depth + 1); } catch (e) {}
-            if (foundObj) return;
-          }
-        }
-      };
-      try { walkFind(server, 0); } catch (e) {}
-      if (foundObj) return await tryInvokeFromObj(foundObj);
-
-      return null;
-    };
-
     const result = await invokeToolByName(tool, args || {});
     if (result !== null && result !== undefined) {
       try {
@@ -778,6 +753,177 @@ app.post("/tools/call", async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ error: err.message || String(err) });
   }
+});
+
+// Extracted invocation helper so we can reuse it for multiple alias endpoints
+async function invokeToolByName(name: string, payload: any) {
+  // prefer locally captured handlers
+  try {
+    if (_localToolHandlers[name]) return await _localToolHandlers[name](payload || {}, {});
+  } catch (e) {}
+
+  const registries = [
+    (server as any)._tools,
+    (server as any).tools,
+    (server as any).toolRegistry,
+    (server as any).registry,
+    (server as any)._toolRegistry,
+    (server as any).registeredTools,
+    (server as any)._registeredTools,
+  ];
+
+  const tryInvokeFromObj = async (obj: any) => {
+    if (!obj) return null;
+    if (typeof obj.handler === 'function') return await obj.handler(payload || {}, {});
+    if (typeof obj.call === 'function') return await obj.call(payload || {}, {});
+    if (typeof obj.run === 'function') return await obj.run(payload || {}, {});
+    return null;
+  };
+
+  for (const reg of registries) {
+    try {
+      if (!reg || typeof reg !== 'object') continue;
+      if (reg[name]) {
+        const r = await tryInvokeFromObj(reg[name]);
+        if (r !== null) return r;
+      }
+    } catch (e) {}
+  }
+
+  const serverCallCandidates = [(server as any).call, (server as any).invoke, (server as any).execute, (server as any).handle];
+  for (const fn of serverCallCandidates) {
+    try {
+      if (typeof fn === 'function') {
+        const maybe = await fn.call(server, name, payload || {});
+        if (maybe !== undefined) return maybe;
+      }
+    } catch (e) {}
+  }
+
+  // recursive find
+  const visited = new Set<any>();
+  let foundObj: any = null;
+  const walkFind = (node: any, depth = 0) => {
+    if (!node || depth > 4) return;
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        try {
+          const vv: any = v as any;
+          if (k === name || (vv && vv.name === name)) {
+            if (vv && (typeof vv.handler === 'function' || typeof vv.call === 'function' || typeof vv.run === 'function')) {
+              foundObj = vv; return;
+            }
+          }
+        } catch (e) {}
+      }
+      for (const v of Object.values(node)) {
+        try { if (typeof v === 'object') walkFind(v, depth + 1); } catch (e) {}
+        if (foundObj) return;
+      }
+    }
+  };
+  try { walkFind(server, 0); } catch (e) {}
+  if (foundObj) return await tryInvokeFromObj(foundObj);
+
+  return null;
+}
+
+// Alias endpoints for compatibility with various clients
+app.post('/tools/invoke', async (req: Request, res: Response) => {
+  const { tool, args } = req.body || {};
+  if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
+  try {
+    const result = await invokeToolByName(tool, args || {});
+    if (result === null || result === undefined) return res.status(404).json({ error: `Tool '${tool}' not found` });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+app.post('/tools/execute', async (req: Request, res: Response) => {
+  const { tool, args } = req.body || {};
+  if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
+  try {
+    const result = await invokeToolByName(tool, args || {});
+    if (result === null || result === undefined) return res.status(404).json({ error: `Tool '${tool}' not found` });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+app.post('/mcp/call', async (req: Request, res: Response) => {
+  // Mirror /tools/call semantics
+  const { tool, args } = req.body || {};
+  if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
+  try {
+    const result = await invokeToolByName(tool, args || {});
+    if (result === null || result === undefined) return res.status(404).json({ error: `Tool '${tool}' not found` });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// POST /messages - compatibility for legacy SSE clients that post messages to the server
+app.post('/messages', async (req: Request, res: Response) => {
+  // Accept either { tool, args } or { method, params } shapes
+  const body = req.body || {};
+  const tool = body.tool || body.method || (body.params && body.params.tool);
+  const args = body.args || body.params || {};
+  if (!tool) return res.status(400).json({ error: "Missing 'tool' in request body" });
+  try {
+    const result = await invokeToolByName(tool, args || {});
+    if (result === null || result === undefined) return res.status(404).json({ error: `Tool '${tool}' not found` });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Lightweight Streamable HTTP compatibility endpoint (/mcp)
+// Accepts JSON-RPC initialize requests and simple tool-invoke shapes.
+app.post('/mcp', async (req: Request, res: Response) => {
+  const body = req.body || {};
+
+  // Handle JSON-RPC initialize requests: return a generated session id
+  if (body?.jsonrpc === '2.0' && body?.method === 'initialize') {
+    const sessionId = new ObjectId().toHexString();
+    return res.json({ jsonrpc: '2.0', result: { sessionId }, id: body.id || null });
+  }
+
+  // If the body is a simple { tool, args } shape, invoke directly
+  if (body && (body.tool || body.method)) {
+    const tool = body.tool || body.method;
+    const params = body.args || body.params || {};
+    try {
+      const result = await invokeToolByName(tool, params || {});
+      if (result === null || result === undefined) {
+        return res.status(404).json({ jsonrpc: '2.0', error: { code: -32601, message: `Tool '${tool}' not found` }, id: body.id || null });
+      }
+      return res.json({ jsonrpc: '2.0', result, id: body.id || null });
+    } catch (err: any) {
+      return res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: err.message || String(err) }, id: body.id || null });
+    }
+  }
+
+  return res.status(400).json({ jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id: body.id || null });
+});
+
+// GET/DELETE /mcp are used by some transports to check session validity
+app.get('/mcp', (req: Request, res: Response) => {
+  const sessionId = req.headers['mcp-session-id'] as string | undefined;
+  if (!sessionId) return res.status(400).send('Invalid or missing session ID');
+  return res.status(200).send('OK');
+});
+
+app.delete('/mcp', (req: Request, res: Response) => {
+  const sessionId = req.headers['mcp-session-id'] as string | undefined;
+  if (!sessionId) return res.status(400).send('Invalid or missing session ID');
+  return res.status(200).send('OK');
 });
 
 // Endpoint to list available tools (discovery for HTTP/SSE clients)
