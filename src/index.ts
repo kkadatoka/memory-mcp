@@ -1,6 +1,6 @@
 // SSE handler and variables at top-level scope
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import express from "express";
+import express, { Request, Response } from "express";
 import { z } from "zod";
 import { EventEmitter } from "events";
 import { ObjectId } from "mongodb";
@@ -550,7 +550,7 @@ const serverPort = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 // SSE clients
 const sseClients: Array<{ res: express.Response }> = [];
 
-app.get("/sse", (req, res) => {
+app.get("/sse", (req: Request, res: Response) => {
   res.set({
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -558,6 +558,24 @@ app.get("/sse", (req, res) => {
   });
   res.write("retry: 10000\n\n");
   sseClients.push({ res });
+
+  // On connect, send available tools as a named event so clients can discover capabilities
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.write(`event: tools\n`);
+    res.write(`data: ${JSON.stringify({ tools })}\n\n`);
+  } catch (err) {
+    // ignore discovery errors for SSE
+  }
 
   const interval = setInterval(() => {
     res.write(`data: ${JSON.stringify({ message: "Hello from SSE!" })}\n\n`);
@@ -571,10 +589,29 @@ app.get("/sse", (req, res) => {
   });
 });
 
+// SSE clients may also request the tools list over HTTP
+app.get("/sse/list-tools", (req: Request, res: Response) => {
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.json({ tools });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.json());
 
-app.post("/mcp/:tool", async (req, res) => {
-  const toolName = req.params.tool;
+app.post("/mcp/:tool", async (req: Request, res: Response) => {
+  const toolName = req.params.tool as string;
   const params = req.body;
   try {
     // Use MCP SDK internal _tools registry
@@ -589,8 +626,107 @@ app.post("/mcp/:tool", async (req, res) => {
   }
 });
 
+// POST endpoint for SSE clients to invoke tools and receive results via SSE broadcasts
+app.post("/sse/:tool", async (req: Request, res: Response) => {
+  const toolName = req.params.tool as string;
+  const params = req.body;
+  try {
+    if ((server as any)._tools && (server as any)._tools[toolName]) {
+      const result = await (server as any)._tools[toolName].handler(params, {});
+
+      // Broadcast the result to all connected SSE clients as a named event
+      try {
+        const payload = { tool: toolName, params, result };
+        const data = JSON.stringify(payload);
+        sseClients.forEach((c) => {
+          try {
+            c.res.write(`event: tool-result\n`);
+            c.res.write(`data: ${data}\n\n`);
+          } catch (e) {
+            // ignore write errors per-client
+          }
+        });
+      } catch (broadcastErr) {
+        // ignore broadcasting errors
+      }
+
+      res.json(result);
+    } else {
+      res.status(404).json({ error: `Tool '${toolName}' not found` });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Canonical MCP endpoints (tools/list and tools/call) for compatibility with MCP clients
+app.get("/tools/list", (req, res) => {
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.json({ tools });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/tools/list", (req: Request, res: Response) => {
+  try {
+    const tools: Array<{ name: string; description: string; params: string[] }> = [];
+    if ((server as any)._tools) {
+      for (const [name, meta] of Object.entries((server as any)._tools)) {
+        tools.push({
+          name,
+          description: (meta as any).description || "",
+          params: Object.keys(((meta as any).schema && (meta as any).schema._def && (meta as any).schema._def.shape) || {}),
+        });
+      }
+    }
+    res.json({ tools });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/tools/call", async (req: Request, res: Response) => {
+  const { tool, args } = req.body || {};
+  if (!tool) {
+    return res.status(400).json({ error: "Missing 'tool' in request body" });
+  }
+  try {
+    if ((server as any)._tools && (server as any)._tools[tool]) {
+      const result = await (server as any)._tools[tool].handler(args || {}, {});
+
+      // Broadcast over SSE as well
+      try {
+        const payload = { tool, params: args || {}, result };
+        const data = JSON.stringify(payload);
+        sseClients.forEach((c) => {
+          try {
+            c.res.write(`event: tool-result\n`);
+            c.res.write(`data: ${data}\n\n`);
+          } catch (e) {}
+        });
+      } catch (e) {}
+
+      return res.json(result);
+    }
+    res.status(404).json({ error: `Tool '${tool}' not found` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Endpoint to list available tools (discovery for HTTP/SSE clients)
-app.get("/mcp/tools", (req, res) => {
+app.get("/mcp/tools", (req: Request, res: Response) => {
   try {
     const tools: Array<{ name: string; description: string; params: string[] }> = [];
     if ((server as any)._tools) {
@@ -609,7 +745,7 @@ app.get("/mcp/tools", (req, res) => {
 });
 
 // POST variant for clients that prefer JSON body (keeps parity with /mcp/:tool)
-app.post("/mcp/list-tools", (req, res) => {
+app.post("/mcp/list-tools", (req: Request, res: Response) => {
   try {
     const tools: Array<{ name: string; description: string; params: string[] }> = [];
     if ((server as any)._tools) {
