@@ -7,11 +7,8 @@ WORKDIR /app
 # Copy package.json and package-lock.json (if present)
 COPY package*.json ./
 
-
-
-# Install all dependencies (including dev)
-RUN npm install
-RUN npm install express @types/express
+# Install all dependencies using lockfile for deterministic builds
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Copy the rest of the project files
 COPY . .
