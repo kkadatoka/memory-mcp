@@ -8,7 +8,15 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    // Helpful path aliases for the refactor
+    "baseUrl": "./",
+    "paths": {
+      "@server/*": ["src/server/*"],
+      "@memory/*": ["src/memory/*"],
+      "@db/*": ["src/db/*"],
+      "@utils/*": ["src/utils/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
