@@ -19,8 +19,11 @@ services:
       - mongodb
     environment:
       MONGODB_URI: mongodb://mongodb:27017/memorydb
+      HOST: 0.0.0.0
+      ARCHIVE_THRESHOLD: 0.8  # 80% of max
+      RETRIEVE_THRESHOLD: 0.3 # 30% of max
     ports:
-      - "8097:3000" # Adjust if your app listens on a different port
+      - "8097:3000" # Map host 8097 to container 3000 (app listens on PORT 3000)
     # Uncomment if you want to run in development mode
     # command: npm run dev
 

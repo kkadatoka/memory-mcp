@@ -30,7 +30,7 @@ export class HttpTransportProvider implements TransportProvider {
    * @param host Host address
    * @param port Port number
    */
-  constructor(private host: string = "localhost", private port: number = 5000) {
+  constructor(private host: string = "localhost", private port: number = 3000) {
     this.app = express();
     this.app.use(express.json());
 

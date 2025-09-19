@@ -16,7 +16,7 @@ export function createTransportProvider(
   if (config.type === "http") {
     return new HttpTransportProvider(
       config.host || "localhost",
-      config.port || 5000
+      config.port || 3000
     );
   }
 
