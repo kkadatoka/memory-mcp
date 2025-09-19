@@ -14,5 +14,12 @@ RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install
 COPY --from=build /app/build ./build
 
 EXPOSE 3000
-ENV MONGODB_URI=
-CMD ["node", "build/index.js"]
+
+ENV ARCHIVE_THRESHOLD=0.8
+ENV RETRIEVE_THRESHOLD=0.3
+ENV HOST=0.0.0.0
+ENV MONGODB_URI=mongodb://localhost:27017/memorydb
+# set to --debug to enable debug logging in docker-compose
+ENV DEBUG="" 
+
+CMD "sh" "-c" "node build/index.js --log --host=$HOST --port=3000 $DEBUG"

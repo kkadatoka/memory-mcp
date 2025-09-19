@@ -43,6 +43,7 @@ function createServer() {
     const toolName = request.params.name;
     const handler = toolHandlers[toolName];
 
+    logger.info(`[Tools] Invoking tool: ${toolName}`);
     if (!handler) {
       throw new Error(`Unknown tool: ${toolName}`);
     }
