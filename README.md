@@ -69,8 +69,8 @@ docker compose up --build
 If you don't have Docker locally, this repository includes a GitHub Actions workflow that builds and publishes a Docker image to GitHub Container Registry on pushes to `main` (or via the workflow_dispatch manual trigger). After the workflow runs you can pull the image as:
 
 ```bash
-docker pull ghcr.io/<your-github-username>/memory-mcp:latest
-docker run -e MONGODB_URI="mongodb://<host>:27017/memorydb" -p 3000:3000 ghcr.io/<your-github-username>/memory-mcp:latest
+docker pull ghcr.io/tekgnosis-net/memory-mcp:latest
+docker run -e MONGODB_URI="mongodb://<host>:27017/memorydb" -p 3000:3000 ghcr.io/tekgnosis-net/memory-mcp:latest
 ```
 
 Replace `<your-github-username>` with your GitHub account or organization name.
