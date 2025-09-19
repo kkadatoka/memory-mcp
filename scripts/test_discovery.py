@@ -63,7 +63,8 @@ def check_discovery(base_url):
 
 def call_examples(base_url, discovered):
     # Try calling a simple tool if available
-    candidates = ['get-memories', 'save-memories', 'clear-memories']
+    # Match actual tool names from src/tools/defs.ts
+    candidates = ['get-all-memories', 'save-memories', 'clear-all-memories']
     found = None
     if discovered:
         names = [t.get('name') if isinstance(t, dict) else t for t in discovered]
