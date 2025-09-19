@@ -2,16 +2,16 @@
 // Exported functions will be implemented during the refactor.
 import {
   saveMemoriesTool,
+  addMemoriesTool,
   getAllMemoriesTool,
   clearAllMemoriesTool,
-  addMemoriesTool,
   archiveContextTool,
   retrieveContextTool,
   scoreRelevanceTool,
+  createSummaryTool,
   getConversationSummariesTool,
   searchContextByTagsTool,
-  createSummaryTool,
-  } from "./defs.js"
+  } from "./memory.js";
 
 import {
   connect,
@@ -68,16 +68,16 @@ export const toolHandlers = {
 */
 
 export const toolHandlers = {
-  [saveMemoriesTool.name]: saveMemories,
-  [getAllMemoriesTool.name]: getAllMemories,
-  [clearAllMemoriesTool.name]: clearAllMemories,
-  [addMemoriesTool.name]: addMemories,
-  [archiveContextTool.name]: archiveContext,
-  [retrieveContextTool.name]: retrieveContext,
-  [scoreRelevanceTool.name]: scoreRelevance,
-  [getConversationSummariesTool.name]: getConversationSummaries,
-  [searchContextByTagsTool.name]: searchContextByTags,
-  [createSummaryTool.name]: createSummary
+  [saveMemoriesTool.name]: saveMemoriesTool,
+  [getAllMemoriesTool.name]: getAllMemoriesTool,
+  [clearAllMemoriesTool.name]: clearAllMemoriesTool,
+  [addMemoriesTool.name]: addMemoriesTool,
+  [archiveContextTool.name]: archiveContextTool,
+  [retrieveContextTool.name]: retrieveContextTool,
+  [scoreRelevanceTool.name]: scoreRelevanceTool,
+  [getConversationSummariesTool.name]: getConversationSummariesTool,
+  [searchContextByTagsTool.name]: searchContextByTagsTool,
+  [createSummaryTool.name]: createSummaryTool
 };
 
 export { connect, closeDatabase }; // Export connect and closeDatabase for external use

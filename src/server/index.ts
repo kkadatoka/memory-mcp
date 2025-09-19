@@ -1,11 +1,10 @@
-// Minimal server module placeholder
-// Export a function to create/start the server. The real implementation will be
-// added during the refactor.
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+
 import { tools, toolHandlers } from "../tools/index.js";
 import { TransportProvider } from "../transports/types.js";
 import { logger } from "../utils/logger.js";
@@ -48,7 +47,12 @@ function createServer() {
       throw new Error(`Unknown tool: ${toolName}`);
     }
 
-    const raw = await handler(request.params.arguments);
+    return handler(request.params.arguments);
+
+    // Some handlers are strongly typed to expect multiple context arguments; cast to any
+    // so we can invoke with the single arguments payload as used here.
+    /*
+    const raw = await (handler)(request.params.arguments);
 
     // Normalize raw results into a plain object or ServerResult-compatible shape
     let normalized: any;
@@ -72,11 +76,16 @@ function createServer() {
         out[k] = stringifyObjectIds(obj[k]);
       }
       return out;
+      
+
+
     }
 
     normalized = stringifyObjectIds(normalized);
     logger.info(`[Tools] Executed tool: ${toolName}`);
     return normalized;
+    */
+
   });
 
   return server;
