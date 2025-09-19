@@ -12,7 +12,7 @@ services:
 
   memory-mcp:
     #build: .
-    image: ghcr.io/kkadatoka/memory-mcp:latest # Use the image built and pushed to GitHub Container Registry
+    image: ghcr.io/tekgnosis-net/memory-mcp:latest # Use the image built and pushed to GitHub Container Registry
     container_name: memory-mcp-app
     restart: always
     depends_on:
