@@ -27,18 +27,23 @@ function createServer() {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    logger.info("[Tools] Listing available tools");
-    return {
-      tools,
-    };
-  });
+  server.setRequestHandler(
+    ListToolsRequestSchema,
+    (async (_request: any, _context: any, _connection: any, _meta?: any) => {
+      logger.info(`[Tools] Listing available tools: ${tools.map(t => t.name).join(", ")}`);
+      return {
+        tools,
+      };
+    }) as any
+  );
 
   /**
    * Handle tool call requests
    * Dispatch to the appropriate tool implementation
    */
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(
+    CallToolRequestSchema,
+    (async (request: any, _context: any, _connection: any, _meta?: any) => {
     const toolName = request.params.name;
     const handler = toolHandlers[toolName];
 
@@ -48,7 +53,8 @@ function createServer() {
     }
 
     return handler(request.params.arguments);
-
+    }) as any
+  );
     // Some handlers are strongly typed to expect multiple context arguments; cast to any
     // so we can invoke with the single arguments payload as used here.
     /*
@@ -85,8 +91,6 @@ function createServer() {
     logger.info(`[Tools] Executed tool: ${toolName}`);
     return normalized;
     */
-
-  });
 
   return server;
 }
