@@ -1,6 +1,7 @@
 import { MongoClient, ObjectId, Db, Collection } from "mongodb";
 import { Memory, ContextType } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { clear } from "console";
 
 // MongoDB connection details
 
@@ -30,6 +31,16 @@ export async function saveMemories(
   llm: string,
   userId?: string,
 ): Promise<void> {
+    await clearAllMemories();
+    await addMemories(memories, llm, userId);
+    logger.info("[Database] Saved memories");
+}
+
+export async function addMemories(
+  memories: string[],
+  llm: string,
+  userId?: string,
+): Promise<void> {
     await connect();
     const memoryDoc: Memory = {
         memories,
@@ -38,7 +49,7 @@ export async function saveMemories(
         userId,
     };
     await collection.insertOne(memoryDoc);
-    logger.info("[Database] Saved memories");
+    logger.info("[Database] Added memories");
 }
 
 export async function getAllMemories(): Promise<Memory[]> {

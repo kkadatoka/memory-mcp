@@ -16,6 +16,7 @@ import {
 import {
   connect,
   saveMemories,
+  addMemories,
   getAllMemories,
   clearAllMemories,
   closeDatabase,
@@ -51,6 +52,7 @@ function adapt<T extends (...a: any[]) => any>(fn: T, paramNames: string[]) {
   };
 }
 
+/*
 export const toolHandlers = {
   [saveMemoriesTool.name]: adapt(saveMemories, ["memories", "llm", "userId"]),
   [getAllMemoriesTool.name]: adapt(getAllMemories, []),
@@ -62,6 +64,20 @@ export const toolHandlers = {
   [getConversationSummariesTool.name]: adapt(getConversationSummaries, ["conversationId"]),
   [searchContextByTagsTool.name]: adapt(searchContextByTags, ["tags"]),
   [createSummaryTool.name]: adapt(createSummary, ["conversationId", "contextItems", "summaryText", "llm", "userId"]),
+};
+*/
+
+export const toolHandlers = {
+  [saveMemoriesTool.name]: saveMemories,
+  [getAllMemoriesTool.name]: getAllMemories,
+  [clearAllMemoriesTool.name]: clearAllMemories,
+  [addMemoriesTool.name]: addMemories,
+  [archiveContextTool.name]: archiveContext,
+  [retrieveContextTool.name]: retrieveContext,
+  [scoreRelevanceTool.name]: scoreRelevance,
+  [getConversationSummariesTool.name]: getConversationSummaries,
+  [searchContextByTagsTool.name]: searchContextByTags,
+  [createSummaryTool.name]: createSummary
 };
 
 export { connect, closeDatabase }; // Export connect and closeDatabase for external use

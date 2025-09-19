@@ -39,7 +39,7 @@ function createServer() {
    * Handle tool call requests
    * Dispatch to the appropriate tool implementation
    */
-  server.setRequestHandler(CallToolRequestSchema, async (request, _extra) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
     const handler = toolHandlers[toolName];
 
