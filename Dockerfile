@@ -21,5 +21,6 @@ ENV HOST=0.0.0.0
 ENV MONGODB_URI=mongodb://localhost:27017/memorydb
 # set to --debug to enable debug logging in docker-compose
 ENV DEBUG="" 
+ENV TRANSPORT="http"
 
-CMD "sh" "-c" "node build/index.js --log --host=$HOST --port=3000 $DEBUG"
+CMD ["sh", "-c", "node build/index.js --log --transport=$TRANSPORT --host=$HOST --port=3000 $DEBUG"]
