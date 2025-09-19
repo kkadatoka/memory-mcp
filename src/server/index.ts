@@ -49,10 +49,31 @@ function createServer() {
 
     const raw = await handler(request.params.arguments);
 
-    const normalized = 
-      raw === null || raw === undefined
-        ? {}
-        : (typeof raw === "object" && !Array.isArray(raw)) ? raw : { value: raw };
+    // Normalize raw results into a plain object or ServerResult-compatible shape
+    let normalized: any;
+    if (raw === null || raw === undefined) {
+      normalized = {};
+    } else if (typeof raw === "object" && !Array.isArray(raw)) {
+      normalized = raw;
+    } else {
+      normalized = { value: raw };
+    }
+
+    // Convert MongoDB ObjectId to string when present to ensure JSON-serializable results
+    function stringifyObjectIds(obj: any): any {
+      if (!obj || typeof obj !== 'object') return obj;
+      // Detect ObjectId by toHexString or _bsontype
+      if (typeof obj.toHexString === 'function') return String(obj.toHexString());
+      if (obj._bsontype === 'ObjectID' && obj.toString) return String(obj.toString());
+      if (Array.isArray(obj)) return obj.map(stringifyObjectIds);
+      const out: any = {};
+      for (const k of Object.keys(obj)) {
+        out[k] = stringifyObjectIds(obj[k]);
+      }
+      return out;
+    }
+
+    normalized = stringifyObjectIds(normalized);
     logger.info(`[Tools] Executed tool: ${toolName}`);
     return normalized;
   });

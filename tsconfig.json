@@ -13,9 +13,10 @@
     "baseUrl": "./",
     "paths": {
       "@server/*": ["src/server/*"],
-      "@memory/*": ["src/memory/*"],
+      "@tools/*": ["src/tools/*"],
       "@db/*": ["src/db/*"],
-      "@utils/*": ["src/utils/*"]
+      "@utils/*": ["src/utils/*"],
+      "@config/*": ["src/config/*"]
     }
   },
   "include": ["src/**/*"],
